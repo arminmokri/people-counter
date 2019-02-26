@@ -1,6 +1,7 @@
 //#include <cstdlib>
 #include <iostream>
 #include <stdio.h>
+#include <sys/time.h>
 using namespace std;
 
 #include <opencv/cv.hpp>
@@ -14,23 +15,37 @@ using namespace cv;
 #define CONST_BLACK 0
 #define CONST_WHITE 255
 
-//struct rectangle
+typedef struct position {
+    Point_<int> prev_pos;
+    int direction;
+    int seq_notUse;
+    bool inUse;
+} Position;
 
 void extractForegroundInMat(
         Mat matForeground,
         Mat matBackground,
         Mat matFrame,
         int threshold,
-        bool removeBlack
+        bool removeBlack,
+        int blackThreshold,
+        bool removeWhite,
+        int whiteThreshold
         ) {
     for (int i = 0; i < matForeground.rows; i++) {
         for (int j = 0; j < matForeground.cols; j++) {
             int diff = abs((int) matFrame.at<uchar> (i, j) - (int) matBackground.at<uchar> (i, j));
             if (diff < threshold) {
                 matForeground.at<uchar> (i, j) = CONST_WHITE;
-            } else if (removeBlack && matFrame.at<uchar> (i, j) >= 0 && matFrame.at<uchar>(i, j) <= 0) {
+            } else if (removeBlack &&
+                    matFrame.at<uchar> (i, j) >= CONST_BLACK &&
+                    matFrame.at<uchar>(i, j) <= (CONST_BLACK + blackThreshold)
+                    ) {
                 matForeground.at<uchar> (i, j) = CONST_WHITE;
-            } else if (false && matFrame.at<uchar> (i, j) >= 230 && matFrame.at<uchar>(i, j) < CONST_WHITE) {
+            } else if (removeWhite &&
+                    matFrame.at<uchar> (i, j) >= (CONST_WHITE - whiteThreshold) &&
+                    matFrame.at<uchar>(i, j) <= CONST_WHITE
+                    ) {
                 matForeground.at<uchar> (i, j) = CONST_WHITE;
             } else {
                 matForeground.at<uchar> (i, j) = matFrame.at<uchar> (i, j);
@@ -398,21 +413,6 @@ void matrixScalerMultiplaction(int** matrix, int rowCount, int colCount, int** d
     }
 }
 
-
-//#define size_matrix 200
-//
-
-typedef struct position {
-    Point_<int> prev_pos;
-    int direction;
-    int seq_notUse;
-    bool inUse;
-} Position;
-
-//#include <chrono>
-#include <sys/time.h>
-//using namespace std::chrono;
-
 int64 currentTimeMillis() {
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -423,349 +423,338 @@ int64 currentTimeMillis() {
 }
 
 void People_Counter(String fileName) {
-    //
-    vector<Position> TrackingPoints;
-    //
-    int CounterIn = 0;
-    int CounterOut = 0;
+
+    try {
+
+        //
+        vector<Position> TrackingPoints;
+        //
+        int CounterIn = 0;
+        int CounterOut = 0;
+
+        CvScalar cvscalar_black = cvScalar(CONST_BLACK);
+        CvScalar cvscalar_white = cvScalar(CONST_WHITE);
+
+        int64 time_current, time_last = 0;
+
+        //int delay = 1000 / (int) videoCapture.get(CV_CAP_PROP_FPS);
+
+        //videoCapture.set(CV_CAP_PROP_POS_FRAMES, 10);
 
 
+        //
+        char key;
+        bool play = true;
+        bool stop = false;
+        //
+        int frame_printtofile = 831;
+        int printtofile = 0;
+        int invert = 0;
+        //
+        int segmentation_parts = 10;
+        int remove_black = 1;
+        int threshold1 = 30;
+        int percent = 30;
+        int reconstruction = 1;
+        int ksize = 3;
+        //
+        int FindExtremum = 1;
+        //
+        int NeighborNumber = 10;
+        int threshold2 = 5;
+        //
+        int track = 1;
+        //
+        const string setting_window_name = "setting";
+        const string hot_keys = "ESC exit";
+        const string hot_keys2 = "space pause/play";
+        //
+        Mat massage = Mat::zeros(60, 450, CV_8UC1);
+        putText(massage, hot_keys, cvPoint(15, 20), FONT_HERSHEY_SIMPLEX, 0.4, cvscalar_white, 0);
+        putText(massage, hot_keys2, cvPoint(15, 20 * 2), FONT_HERSHEY_SIMPLEX, 0.4, cvscalar_white, 0);
+        //
+        namedWindow(setting_window_name, WINDOW_NORMAL);
+        //
+        createTrackbar("print", setting_window_name, &printtofile, 1);
+        createTrackbar("invert", setting_window_name, &invert, 1);
+        createTrackbar("segmentation", setting_window_name, &segmentation_parts, 100);
+        createTrackbar("remove black", setting_window_name, &remove_black, 1);
+        createTrackbar("threshold1", setting_window_name, &threshold1, 100);
+        createTrackbar("percent", setting_window_name, &percent, 100);
+        createTrackbar("reconstruction", setting_window_name, &reconstruction, 1);
+        createTrackbar("median", setting_window_name, &ksize, 100);
+        createTrackbar("FindExtremum", setting_window_name, &FindExtremum, 1);
+        createTrackbar("NeighborNumber", setting_window_name, &NeighborNumber, 100);
+        createTrackbar("threshold2", setting_window_name, &threshold2, 100);
+        createTrackbar("track", setting_window_name, &track, 1);
+        //createTrackbar("erod xy", setting_window_name, &erod_x_y, 100);
+        //createTrackbar("open xy", setting_window_name, &open_x_y, 100);
+        //
+        imshow(setting_window_name, massage);
+        resizeWindow(setting_window_name, 500, 0);
 
-    //try {
+        //
+        vector<Point_<int> > RandomPoints;
+        vector<Point_<int> > ExtremumPoints;
 
-    CvScalar cvscalar_black = cvScalar(CONST_BLACK);
-    CvScalar cvscalar_white = cvScalar(CONST_WHITE);
+        // Mats
+        Mat MatFrame;
+        Mat MatBackground;
+        Mat MatForeground;
+        Mat MatForegroundAvg;
+        Mat MatExtremum;
+        Mat MatForegroundAvgForShow;
 
-    int64 time_current, time_last = 0;
+        // Start Video
+        VideoCapture videoCapture(fileName);
+        videoCapture.set(CV_CAP_PROP_MODE, CV_CAP_MODE_GRAY);
 
-    //int delay = 1000 / (int) videoCapture.get(CV_CAP_PROP_FPS);
+        // get background
+        videoCapture.read(MatBackground);
+        cvtColor(MatBackground, MatBackground, CV_BGR2GRAY, CV_8UC1);
 
-    //videoCapture.set(CV_CAP_PROP_POS_FRAMES, 10);
+        // map size
+        int map_mat_rows = MatBackground.rows / segmentation_parts;
+        int map_mat_cols = MatBackground.cols / segmentation_parts;
 
-
-    //
-    char key;
-    bool play = true;
-    bool stop = false;
-    //
-    int frame_printtofile = 831;
-    int printtofile = 0;
-    int invert = 0;
-    //
-    int segmentation_parts = 10;
-    int remove_black = 1;
-    int threshold1 = 30;
-    int percent = 30;
-    int reconstruction = 1;
-    int ksize = 3;
-    //
-    int FindExtremum = 1;
-    //
-    int NeighborNumber = 10;
-    int threshold2 = 5;
-    //
-    int track = 1;
-    //
-    const string setting_window_name = "setting";
-    const string hot_keys = "ESC exit";
-    const string hot_keys2 = "space pause/play";
-    //
-    Mat massage = Mat::zeros(60, 450, CV_8UC1);
-    putText(massage, hot_keys, cvPoint(15, 20), FONT_HERSHEY_SIMPLEX, 0.4, cvscalar_white, 0);
-    putText(massage, hot_keys2, cvPoint(15, 20 * 2), FONT_HERSHEY_SIMPLEX, 0.4, cvscalar_white, 0);
-    //
-    namedWindow(setting_window_name, WINDOW_NORMAL);
-    //
-    createTrackbar("print", setting_window_name, &printtofile, 1);
-    createTrackbar("invert", setting_window_name, &invert, 1);
-    createTrackbar("segmentation", setting_window_name, &segmentation_parts, 100);
-    createTrackbar("remove black", setting_window_name, &remove_black, 1);
-    createTrackbar("threshold1", setting_window_name, &threshold1, 100);
-    createTrackbar("percent", setting_window_name, &percent, 100);
-    createTrackbar("reconstruction", setting_window_name, &reconstruction, 1);
-    createTrackbar("median", setting_window_name, &ksize, 100);
-    createTrackbar("FindExtremum", setting_window_name, &FindExtremum, 1);
-    createTrackbar("NeighborNumber", setting_window_name, &NeighborNumber, 100);
-    createTrackbar("threshold2", setting_window_name, &threshold2, 100);
-    createTrackbar("track", setting_window_name, &track, 1);
-    //createTrackbar("erod xy", setting_window_name, &erod_x_y, 100);
-    //createTrackbar("open xy", setting_window_name, &open_x_y, 100);
-    //
-    imshow(setting_window_name, massage);
-    resizeWindow(setting_window_name, 500, 0);
-
-    //
-    vector<Point_<int> > RandomPoints;
-    vector<Point_<int> > ExtremumPoints;
-
-    // Mats
-    Mat MatFrame;
-    Mat MatBackground;
-    Mat MatForeground;
-    Mat MatForegroundAvg;
-    Mat MatExtremum;
-    Mat MatForegroundAvgForShow;
-
-    // Start Video
-    VideoCapture videoCapture(fileName);
-    videoCapture.set(CV_CAP_PROP_MODE, CV_CAP_MODE_GRAY);
-
-    // get background
-    videoCapture.read(MatBackground);
-    cvtColor(MatBackground, MatBackground, CV_BGR2GRAY, CV_8UC1);
-
-    // map size
-    int map_mat_rows = MatBackground.rows / segmentation_parts;
-    int map_mat_cols = MatBackground.cols / segmentation_parts;
-
-    // Matrixs
-    int** foreground_min = creatMatrix(map_mat_rows, map_mat_cols);
-    int** foreground_max = creatMatrix(map_mat_rows, map_mat_cols);
-    int** foreground_numberof255 = creatMatrix(map_mat_rows, map_mat_cols);
-    int** foreground_sum = creatMatrix(map_mat_rows, map_mat_cols);
-    int** foreground_avg = creatMatrix(map_mat_rows, map_mat_cols);
+        // Matrixs
+        int** foreground_min = creatMatrix(map_mat_rows, map_mat_cols);
+        int** foreground_max = creatMatrix(map_mat_rows, map_mat_cols);
+        int** foreground_numberof255 = creatMatrix(map_mat_rows, map_mat_cols);
+        int** foreground_sum = creatMatrix(map_mat_rows, map_mat_cols);
+        int** foreground_avg = creatMatrix(map_mat_rows, map_mat_cols);
 
 
-    MatForeground = Mat(MatBackground.rows, MatBackground.cols, CV_8UC1);
+        MatForeground = Mat(MatBackground.rows, MatBackground.cols, CV_8UC1);
 
-    // y1 y2 track
-    int y1track = map_mat_rows / 4;
-    int y2track = (map_mat_rows * 3) / 4;
+        // y1 y2 track
+        int y1track = map_mat_rows / 4;
+        int y2track = (map_mat_rows * 3) / 4;
 
-    while (!stop) {
+        while (!stop) {
 
-        time_current = currentTimeMillis();
+            time_current = currentTimeMillis();
 
-        int segmentation_square = segmentation_parts*segmentation_parts;
+            int segmentation_square = segmentation_parts*segmentation_parts;
 
-        if (play) {
-            if (videoCapture.read(MatFrame)) {
-            } else {
-                //videoCapture.set(CV_CAP_PROP_POS_FRAMES, 0);
-                break;
-            }
-            cvtColor(MatFrame, MatFrame, CV_BGR2GRAY, CV_8UC1);
-        }
-
-        MatForegroundAvg = Mat(MatFrame.rows / segmentation_parts, MatFrame.cols / segmentation_parts, CV_8UC1);
-
-
-        initMatrix(foreground_min, map_mat_rows, map_mat_cols, CONST_WHITE);
-        initMatrix(foreground_max, map_mat_rows, map_mat_cols, CONST_BLACK);
-        initMatrix(foreground_numberof255, map_mat_rows, map_mat_cols, CONST_ZERO);
-        initMatrix(foreground_sum, map_mat_rows, map_mat_cols, CONST_ZERO);
-
-        extractForegroundInMat(MatForeground,
-                MatBackground,
-                MatFrame,
-                threshold1,
-                remove_black
-                );
-
-        matMapFuturesToMatrix(
-                MatForeground,
-                segmentation_parts,
-                foreground_min,
-                foreground_max,
-                foreground_numberof255,
-                foreground_sum
-                );
-
-        matrixScalerMultiplaction(foreground_sum, map_mat_rows, map_mat_cols, foreground_avg, segmentation_square);
-        matrixToMat(foreground_avg, MatForegroundAvg);
-
-        cleanMat(MatForegroundAvg, foreground_numberof255, segmentation_square, percent);
-
-        if (reconstruction == 1) {
-            reconstructionMat(MatForegroundAvg, true, true);
-        }
-
-        if (ksize % 2 == 0) {
-            ksize++;
-        }
-        medianBlur(MatForegroundAvg, MatForegroundAvg, ksize);
-
-        // gereftane darsade sefid va siah to nahye xy
-        Rect rect = getRectObject(MatForegroundAvg);
-        //cout << "x=" << " y=" << " x1=" << x1 << " x2=" << x2 << " y1=" << y1 << " y2=" << y2 << "\n";
-
-        bool small_object = rect.area() >= 0 && rect.area() <= 36;
-
-        if (rect.empty()) {
             if (play) {
-                //MatBackground=MatFrame;
-                //background = frame;
-            }
-        } else if (small_object) {
-        } else if (FindExtremum == 1) {
-
-            getRandomPoint(MatForegroundAvg, rect, &RandomPoints);
-
-            aaa(MatForegroundAvg, rect, &RandomPoints, NeighborNumber);
-
-            MatExtremum = Mat::zeros(MatForegroundAvg.rows, MatForegroundAvg.cols, CV_8UC1);
-            bbb(MatForegroundAvg, MatExtremum, &RandomPoints, &ExtremumPoints, y1track, y2track);
-
-            ccc(MatForegroundAvg, MatExtremum, &ExtremumPoints, threshold2);
-
-            // for video
-            for (int i = 0; i < MatForegroundAvg.rows; i++) {
-                for (int j = 0; j < MatForegroundAvg.cols; j++) {
-                    if (MatExtremum.at<uchar> (i, j) == 255) {
-                        MatForegroundAvg.at<uchar> (i, j) = 255;
-                    }
-                }
-            }
-
-            // for video
-            MatForegroundAvg.at<uchar> (rect.y, rect.x) = 0;
-            MatForegroundAvg.at<uchar> (rect.y, rect.x + rect.width) = 0;
-            MatForegroundAvg.at<uchar> (rect.y + rect.height, rect.x) = 0;
-            MatForegroundAvg.at<uchar> (rect.y + rect.height, rect.x + rect.width) = 0;
-        }
-
-        // for video
-        checkeredMat(MatForeground, segmentation_parts);
-
-
-
-        for (int i = 0; i < MatForegroundAvg.cols; i++) {
-            MatForegroundAvg.at<uchar> (y1track, i) = 0;
-            MatForegroundAvg.at<uchar> (y2track, i) = 0;
-        }
-
-        for (int i = 0; i < ExtremumPoints.size(); i++) {
-            if (MatForegroundAvg.at<uchar> (ExtremumPoints[i]) != 255) {
-                MatForegroundAvg.at<uchar> (ExtremumPoints[i]) = 255;
-            } else {
-                MatForegroundAvg.at<uchar> (ExtremumPoints[i]) = 0;
-            }
-        }
-
-        if (invert == 1) {
-            invertMat(MatForegroundAvg);
-        }
-
-        if (printtofile == 1) {
-            for (int i = 0; i < MatForegroundAvg.rows; i++) {
-                for (int j = 0; j < MatForegroundAvg.cols; j++) {
-                    if (videoCapture.get(CV_CAP_PROP_POS_FRAMES) == frame_printtofile) {
-                        //printf("%3d ", MatForegroundAvg.at<uchar> (i, j));
-                    }
-                }
-                if (videoCapture.get(CV_CAP_PROP_POS_FRAMES) == frame_printtofile) {
-                    cout << "\n";
-                }
-            }
-        }
-
-
-        MatForegroundAvgForShow = Mat(MatFrame.rows, MatFrame.cols, CV_8UC1);
-        for (int i = 0; i < MatFrame.rows; i++) {
-            for (int j = 0; j < MatFrame.cols; j++) {
-                int p = i / segmentation_parts;
-                int q = j / segmentation_parts;
-                MatForegroundAvgForShow.at<uchar> (i, j) = MatForegroundAvg.at<uchar> (p, q);
-                if (invert) {
-                    if (i % segmentation_parts == 0 || j % segmentation_parts == 0) {
-                        MatForegroundAvgForShow.at<uchar> (i, j) = 255;
-                    }
+                if (videoCapture.read(MatFrame)) {
                 } else {
-                    if (i % segmentation_parts == 0 || j % segmentation_parts == 0) {
-                        MatForegroundAvgForShow.at<uchar> (i, j) = 0;
+                    //videoCapture.set(CV_CAP_PROP_POS_FRAMES, 0);
+                    break;
+                }
+                cvtColor(MatFrame, MatFrame, CV_BGR2GRAY, CV_8UC1);
+            }
+
+            MatForegroundAvg = Mat(MatFrame.rows / segmentation_parts, MatFrame.cols / segmentation_parts, CV_8UC1);
+
+
+            initMatrix(foreground_min, map_mat_rows, map_mat_cols, CONST_WHITE);
+            initMatrix(foreground_max, map_mat_rows, map_mat_cols, CONST_BLACK);
+            initMatrix(foreground_numberof255, map_mat_rows, map_mat_cols, CONST_ZERO);
+            initMatrix(foreground_sum, map_mat_rows, map_mat_cols, CONST_ZERO);
+
+            extractForegroundInMat(MatForeground,
+                    MatBackground,
+                    MatFrame,
+                    threshold1,
+                    remove_black, 1,
+                    false, 0
+                    );
+
+            matMapFuturesToMatrix(
+                    MatForeground,
+                    segmentation_parts,
+                    foreground_min,
+                    foreground_max,
+                    foreground_numberof255,
+                    foreground_sum
+                    );
+
+            matrixScalerMultiplaction(foreground_sum, map_mat_rows, map_mat_cols, foreground_avg, segmentation_square);
+            matrixToMat(foreground_avg, MatForegroundAvg);
+
+            cleanMat(MatForegroundAvg, foreground_numberof255, segmentation_square, percent);
+
+            if (reconstruction == 1) {
+                reconstructionMat(MatForegroundAvg, true, true);
+            }
+
+            if (ksize % 2 == 0) {
+                ksize++;
+            }
+            medianBlur(MatForegroundAvg, MatForegroundAvg, ksize);
+
+            // gereftane darsade sefid va siah to nahye xy
+            Rect rect = getRectObject(MatForegroundAvg);
+            //cout << "x=" << " y=" << " x1=" << x1 << " x2=" << x2 << " y1=" << y1 << " y2=" << y2 << "\n";
+
+            bool small_object = rect.area() >= 0 && rect.area() <= 36;
+
+            if (rect.empty()) {
+                if (play) {
+                    //MatBackground=MatFrame;
+                    //background = frame;
+                }
+            } else if (small_object) {
+            } else if (FindExtremum == 1) {
+
+                getRandomPoint(MatForegroundAvg, rect, &RandomPoints);
+
+                aaa(MatForegroundAvg, rect, &RandomPoints, NeighborNumber);
+
+                MatExtremum = Mat::zeros(MatForegroundAvg.rows, MatForegroundAvg.cols, CV_8UC1);
+                bbb(MatForegroundAvg, MatExtremum, &RandomPoints, &ExtremumPoints, y1track, y2track);
+
+                ccc(MatForegroundAvg, MatExtremum, &ExtremumPoints, threshold2);
+
+                // for video
+                for (int i = 0; i < MatForegroundAvg.rows; i++) {
+                    for (int j = 0; j < MatForegroundAvg.cols; j++) {
+                        if (MatExtremum.at<uchar> (i, j) == 255) {
+                            MatForegroundAvg.at<uchar> (i, j) = 255;
+                        }
+                    }
+                }
+
+                // for video
+                MatForegroundAvg.at<uchar> (rect.y, rect.x) = 0;
+                MatForegroundAvg.at<uchar> (rect.y, rect.x + rect.width) = 0;
+                MatForegroundAvg.at<uchar> (rect.y + rect.height, rect.x) = 0;
+                MatForegroundAvg.at<uchar> (rect.y + rect.height, rect.x + rect.width) = 0;
+            }
+
+            // for video
+            checkeredMat(MatForeground, segmentation_parts);
+
+
+
+            for (int i = 0; i < MatForegroundAvg.cols; i++) {
+                MatForegroundAvg.at<uchar> (y1track, i) = 0;
+                MatForegroundAvg.at<uchar> (y2track, i) = 0;
+            }
+
+            for (int i = 0; i < ExtremumPoints.size(); i++) {
+                if (MatForegroundAvg.at<uchar> (ExtremumPoints[i]) != 255) {
+                    MatForegroundAvg.at<uchar> (ExtremumPoints[i]) = 255;
+                } else {
+                    MatForegroundAvg.at<uchar> (ExtremumPoints[i]) = 0;
+                }
+            }
+
+            if (invert == 1) {
+                invertMat(MatForegroundAvg);
+            }
+
+            if (printtofile == 1) {
+                for (int i = 0; i < MatForegroundAvg.rows; i++) {
+                    for (int j = 0; j < MatForegroundAvg.cols; j++) {
+                        if (videoCapture.get(CV_CAP_PROP_POS_FRAMES) == frame_printtofile) {
+                            //printf("%3d ", MatForegroundAvg.at<uchar> (i, j));
+                        }
+                    }
+                    if (videoCapture.get(CV_CAP_PROP_POS_FRAMES) == frame_printtofile) {
+                        cout << "\n";
                     }
                 }
             }
-        }
 
-
-
-
-
-        //setMouseCallback("Play", Distance_16bit, &frame);
-
-
-
-        stringstream str;
-
-        str = stringstream();
-        int i = time_current - time_last;
-        if (i == 0) {
-            str << "Frame Rate: " << "inf";
-        } else {
-            str << "Frame Rate: " << (int) (1000 / i);
-        }
-        putText(MatForegroundAvgForShow, str.str(), cvPoint(2, 25), FONT_HERSHEY_PLAIN, 2, cvscalar_black, 2);
-
-        str = stringstream();
-        str << "Frame Counter: " << videoCapture.get(CV_CAP_PROP_POS_FRAMES);
-        putText(MatForegroundAvgForShow, str.str(), cvPoint(2, 50), FONT_HERSHEY_PLAIN, 2, cvscalar_black, 2);
-        cout << str.str() << "\n";
-
-        str = stringstream();
-        str << "In: " << CounterIn;
-        putText(MatForegroundAvgForShow, str.str(), cvPoint(2, 75), FONT_HERSHEY_PLAIN, 2, cvscalar_black, 2);
-
-        str = stringstream();
-        str << "Out: " << CounterOut;
-        putText(MatForegroundAvgForShow, str.str(), cvPoint(2, 100), FONT_HERSHEY_PLAIN, 2, cvscalar_black, 2);
-
-
-        //imshow("MatBackground", MatBackground);
-        imshow("MatFrame", MatFrame);
-        imshow("MatForeground", MatForeground);
-        imshow("MatForegroundAvg", MatForegroundAvg);
-        imshow("MatForegroundAvgForShow", MatForegroundAvgForShow);
-
-
-
-        key = waitKey(1);
-        if (key == ',') {
-            if (play) {
-                int temp = (int) videoCapture.get(CV_CAP_PROP_POS_FRAMES);
-                temp = temp - 31;
-                if (temp < 0) {
-                    temp = 0;
+            MatForegroundAvgForShow = Mat(MatFrame.rows, MatFrame.cols, CV_8UC1);
+            for (int i = 0; i < MatFrame.rows; i++) {
+                for (int j = 0; j < MatFrame.cols; j++) {
+                    int p = i / segmentation_parts;
+                    int q = j / segmentation_parts;
+                    MatForegroundAvgForShow.at<uchar> (i, j) = MatForegroundAvg.at<uchar> (p, q);
+                    if (invert) {
+                        if (i % segmentation_parts == 0 || j % segmentation_parts == 0) {
+                            MatForegroundAvgForShow.at<uchar> (i, j) = 255;
+                        }
+                    } else {
+                        if (i % segmentation_parts == 0 || j % segmentation_parts == 0) {
+                            MatForegroundAvgForShow.at<uchar> (i, j) = 0;
+                        }
+                    }
                 }
-                videoCapture.set(CV_CAP_PROP_POS_FRAMES, temp);
-            } else {
-                int temp = (int) videoCapture.get(CV_CAP_PROP_POS_FRAMES);
-                temp = temp - 2;
-                if (temp < 0) {
-                    temp = 0;
-                }
-                videoCapture.set(CV_CAP_PROP_POS_FRAMES, temp);
-                videoCapture.read(MatFrame);
-                cvtColor(MatFrame, MatFrame, CV_BGR2GRAY, CV_8UC1);
             }
-        } else if (key == '.') {
-            if (play) {
-                int temp = (int) videoCapture.get(CV_CAP_PROP_POS_FRAMES);
-                temp = temp + 30;
-                if (temp > videoCapture.get(CV_CAP_PROP_FRAME_COUNT)) {
-                    temp = 0;
-                }
-                videoCapture.set(CV_CAP_PROP_POS_FRAMES, temp);
-            } else {
-                int temp = (int) videoCapture.get(CV_CAP_PROP_POS_FRAMES);
-                //temp = temp + 1;
-                if (temp > videoCapture.get(CV_CAP_PROP_FRAME_COUNT)) {
-                    temp = 0;
-                }
-                videoCapture.set(CV_CAP_PROP_POS_FRAMES, temp);
-                videoCapture.read(MatFrame);
-                cvtColor(MatFrame, MatFrame, CV_BGR2GRAY, CV_8UC1);
-            }
-        } else if (key == ' ') {
-            play = !play;
-        } else if (key == 27) {
-            stop = true;
-        }
 
-        time_last = time_current;
+            stringstream str;
+
+            str = stringstream();
+            int i = time_current - time_last;
+            if (i == 0) {
+                str << "Frame Rate: " << "inf";
+            } else {
+                str << "Frame Rate: " << (int) (1000 / i);
+            }
+            putText(MatForegroundAvgForShow, str.str(), cvPoint(2, 25), FONT_HERSHEY_PLAIN, 2, cvscalar_black, 2);
+
+            str = stringstream();
+            str << "Frame Counter: " << videoCapture.get(CV_CAP_PROP_POS_FRAMES);
+            putText(MatForegroundAvgForShow, str.str(), cvPoint(2, 50), FONT_HERSHEY_PLAIN, 2, cvscalar_black, 2);
+            cout << str.str() << "\n";
+
+            str = stringstream();
+            str << "In: " << CounterIn;
+            putText(MatForegroundAvgForShow, str.str(), cvPoint(2, 75), FONT_HERSHEY_PLAIN, 2, cvscalar_black, 2);
+
+            str = stringstream();
+            str << "Out: " << CounterOut;
+            putText(MatForegroundAvgForShow, str.str(), cvPoint(2, 100), FONT_HERSHEY_PLAIN, 2, cvscalar_black, 2);
+
+
+            //imshow("MatBackground", MatBackground);
+            imshow("MatFrame", MatFrame);
+            imshow("MatForeground", MatForeground);
+            imshow("MatForegroundAvg", MatForegroundAvg);
+            imshow("MatForegroundAvgForShow", MatForegroundAvgForShow);
+
+            key = waitKey(1);
+            if (key == ',') {
+                if (play) {
+                    int temp = (int) videoCapture.get(CV_CAP_PROP_POS_FRAMES);
+                    temp = temp - 31;
+                    if (temp < 0) {
+                        temp = 0;
+                    }
+                    videoCapture.set(CV_CAP_PROP_POS_FRAMES, temp);
+                } else {
+                    int temp = (int) videoCapture.get(CV_CAP_PROP_POS_FRAMES);
+                    temp = temp - 2;
+                    if (temp < 0) {
+                        temp = 0;
+                    }
+                    videoCapture.set(CV_CAP_PROP_POS_FRAMES, temp);
+                    videoCapture.read(MatFrame);
+                    cvtColor(MatFrame, MatFrame, CV_BGR2GRAY, CV_8UC1);
+                }
+            } else if (key == '.') {
+                if (play) {
+                    int temp = (int) videoCapture.get(CV_CAP_PROP_POS_FRAMES);
+                    temp = temp + 30;
+                    if (temp > videoCapture.get(CV_CAP_PROP_FRAME_COUNT)) {
+                        temp = 0;
+                    }
+                    videoCapture.set(CV_CAP_PROP_POS_FRAMES, temp);
+                } else {
+                    int temp = (int) videoCapture.get(CV_CAP_PROP_POS_FRAMES);
+                    //temp = temp + 1;
+                    if (temp > videoCapture.get(CV_CAP_PROP_FRAME_COUNT)) {
+                        temp = 0;
+                    }
+                    videoCapture.set(CV_CAP_PROP_POS_FRAMES, temp);
+                    videoCapture.read(MatFrame);
+                    cvtColor(MatFrame, MatFrame, CV_BGR2GRAY, CV_8UC1);
+                }
+            } else if (key == ' ') {
+                play = !play;
+            } else if (key == 27) {
+                stop = true;
+            }
+
+            time_last = time_current;
+        }
+        videoCapture.release();
+    } catch (exception& e) {
+        cout << "Exception: " << e.what() << "\n";
     }
-    videoCapture.release();
-    //} catch (exception& e) {
-    //    cout << "Exception: " << e.what() << "\n";
-    //}
 }

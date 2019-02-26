@@ -11,12 +11,7 @@
  * Created on February 2, 2019, 9:10 PM
  */
 
-#include <cstdlib>
 #include"People Counter.hpp"
-
-#include <iostream>
-#include <stdio.h>
-using namespace std;
 
 /*
  * 
@@ -25,11 +20,7 @@ using namespace std;
 int main(int argc, char** argv) {
 
     //cout << getBuildInformation();
-
-
     People_Counter("test_video/20160313113213.avi");
-
-
 
     return 0;
 }
